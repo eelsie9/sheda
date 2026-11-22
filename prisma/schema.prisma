@@ -8,45 +8,205 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+enum Role {
+  BUYER
+  SELLER
+}
+
+enum ListingType {
+  PRODUCT
+  SERVICE
+}
+
+enum AskStatus {
+  OPEN
+  CLOSED
+}
+
+enum ProposalStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+}
+
 model User {
-  id        String    @id @default(uuid())
-  name      String
-  email     String    @unique
-  password  String
-  isSeller  Boolean   @default(false)
-  bio       String?
-  createdAt DateTime  @default(now())
-  listings  Listing[]
-  boards    Board[]
-  asks      Ask[]
+  id         String   @id @default(uuid())
+  name       String
+  email      String   @unique
+  password   String
+  activeRole Role     @default(BUYER)
+  bio        String?
+  avatar     String?
+  interests  String[] @default([])
+  createdAt  DateTime @default(now())
+
+  sellerProfile   SellerProfile?
+  listings        Listing[]
+  boards          Board[]
+  asks            Ask[]
+  proposals       Proposal[]
+  messages        Message[]
+  posts           Post[]
+  reviewsGiven    Review[]        @relation("ReviewsGiven")
+  reviewsReceived Review[]        @relation("ReviewsReceived")
+  searches        SearchHistory[]
+  views           ListingView[]
+  purchases       Order[]         @relation("BuyerOrders")
+  sales           Order[]         @relation("SellerOrders")
+}
+
+model SellerProfile {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  creativeType   String
+  offerings      String
+  portfolioLinks String[] @default([])
+  socialLinks    String[] @default([])
+  createdAt      DateTime @default(now())
 }
 
 model Listing {
-  id          String   @id @default(uuid())
+  id          String      @id @default(uuid())
   title       String
   description String
   price       Float
-  images      String[]
+  images      String[]    @default([])
   category    String
+  type        ListingType @default(PRODUCT)
   sellerId    String
-  seller      User     @relation(fields: [sellerId], references: [id])
-  createdAt   DateTime @default(now())
+  seller      User        @relation(fields: [sellerId], references: [id])
+  createdAt   DateTime    @default(now())
+
+  boardItems BoardItem[]
+  posts      Post[]
+  views      ListingView[]
+  orders     Order[]
 }
 
 model Board {
+  id          String      @id @default(uuid())
+  name        String
+  description String?
+  isPublic    Boolean     @default(false)
+  tags        String[]    @default([])
+  userId      String
+  user        User        @relation(fields: [userId], references: [id])
+  items       BoardItem[]
+  createdAt   DateTime    @default(now())
+}
+
+model BoardItem {
   id        String   @id @default(uuid())
-  name      String
+  boardId   String
+  board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  listingId String?
+  listing   Listing? @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  imageUrl  String?
+  note      String?
+  createdAt DateTime @default(now())
+}
+
+model Ask {
+  id              String     @id @default(uuid())
+  title           String
+  description     String
+  budget          Float?
+  category        String?
+  referenceImages String[]   @default([])
+  status          AskStatus  @default(OPEN)
+  userId          String
+  user            User       @relation(fields: [userId], references: [id])
+  proposals       Proposal[]
+  createdAt       DateTime   @default(now())
+}
+
+model Proposal {
+  id          String         @id @default(uuid())
+  askId       String
+  ask         Ask            @relation(fields: [askId], references: [id], onDelete: Cascade)
+  sellerId    String
+  seller      User           @relation(fields: [sellerId], references: [id])
+  message     String
+  price       Float?
+  sampleLinks String[]       @default([])
+  status      ProposalStatus @default(PENDING)
+  messages    Message[]
+  createdAt   DateTime       @default(now())
+
+  @@unique([askId, sellerId])
+}
+
+model Message {
+  id         String   @id @default(uuid())
+  proposalId String
+  proposal   Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  senderId   String
+  sender     User     @relation(fields: [senderId], references: [id])
+  text       String
+  createdAt  DateTime @default(now())
+}
+
+model Post {
+  id        String   @id @default(uuid())
+  text      String
+  images    String[] @default([])
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  listingId String?
+  listing   Listing? @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+}
+
+model Review {
+  id         String   @id @default(uuid())
+  rating     Int
+  comment    String?
+  sellerId   String
+  seller     User     @relation("ReviewsReceived", fields: [sellerId], references: [id])
+  reviewerId String
+  reviewer   User     @relation("ReviewsGiven", fields: [reviewerId], references: [id])
+  createdAt  DateTime @default(now())
+
+  @@unique([sellerId, reviewerId])
+}
+
+model SearchHistory {
+  id        String   @id @default(uuid())
+  query     String
   userId    String
   user      User     @relation(fields: [userId], references: [id])
   createdAt DateTime @default(now())
 }
 
-model Ask {
-  id          String   @id @default(uuid())
-  title       String
-  description String
-  budget      Float?
-  userId      String
-  user        User     @relation(fields: [userId], references: [id])
-  createdAt   DateTime @default(now())
+model ListingView {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  listingId String
+  listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  viewedAt  DateTime @default(now())
+
+  @@unique([userId, listingId])
+}
+
+model Order {
+  id        String      @id @default(uuid())
+  title     String
+  price     Float
+  status    OrderStatus @default(PENDING)
+  buyerId   String
+  buyer     User        @relation("BuyerOrders", fields: [buyerId], references: [id])
+  sellerId  String
+  seller    User        @relation("SellerOrders", fields: [sellerId], references: [id])
+  listingId String?
+  listing   Listing?    @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  createdAt DateTime    @default(now())
 }

@@ -1,0 +1,15 @@
+export const CATEGORIES = [
+  "Art",
+  "Illustration",
+  "Graphic Design",
+  "Fashion",
+  "Jewelry",
+  "Crafts",
+  "Photography",
+  "Videography",
+  "Music",
+  "Writing",
+  "Web Design",
+  "Beauty",
+  "Other",
+];
