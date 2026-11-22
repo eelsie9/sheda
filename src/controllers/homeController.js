@@ -1,8 +1,8 @@
 import prisma from "../lib/prisma.js";
 import { CATEGORIES } from "../utils/categories.js";
-import { getRatings, noRating } from "../utils/helpers.js";
+import { getRatings, isVerified, noRating } from "../utils/helpers.js";
 
-const sellerSelect = { select: { id: true, name: true, avatar: true } };
+const person = { select: { id: true, name: true, avatar: true } };
 
 export const getCategories = (req, res) => {
   res.json({ categories: CATEGORIES });
@@ -10,19 +10,12 @@ export const getCategories = (req, res) => {
 
 export const getHome = async (req, res) => {
   try {
-    // Categories with how many listings each has
-    const counts = await prisma.listing.groupBy({
-      by: ["category"],
-      _count: { _all: true },
-    });
+    const counts = await prisma.listing.groupBy({ by: ["category"], _count: { _all: true } });
     const countMap = {};
     counts.forEach((c) => {
       countMap[c.category.toLowerCase()] = c._count._all;
     });
-    const categories = CATEGORIES.map((name) => ({
-      name,
-      count: countMap[name.toLowerCase()] || 0,
-    }));
+    const categories = CATEGORIES.map((name) => ({ name, count: countMap[name.toLowerCase()] || 0 }));
 
     // Recommended: based on the buyer's interests, otherwise newest
     const interests = req.user?.interests || [];
@@ -36,48 +29,79 @@ export const getHome = async (req, res) => {
             { title: { contains: i, mode: "insensitive" } },
           ]),
         },
-        include: { seller: sellerSelect },
+        include: { seller: person },
         orderBy: { createdAt: "desc" },
         take: 12,
       });
     }
     if (!recommended.length) {
       recommended = await prisma.listing.findMany({
-        include: { seller: sellerSelect },
+        include: { seller: person },
         orderBy: { createdAt: "desc" },
         take: 12,
       });
     }
 
-    // Creators to check out
-    const creators = await prisma.user.findMany({
+    // Creators: verified sellers come first
+    const rows = await prisma.user.findMany({
       where: { sellerProfile: { isNot: null } },
       select: {
         id: true,
         name: true,
         avatar: true,
         bio: true,
-        sellerProfile: { select: { creativeType: true, offerings: true } },
+        sellerProfile: true,
+        listings: { take: 1, orderBy: { createdAt: "desc" }, select: { images: true } },
         _count: { select: { listings: true } },
       },
-      orderBy: { createdAt: "desc" },
-      take: 8,
+      take: 40,
     });
-    const ratings = await getRatings(creators.map((c) => c.id));
-    const featuredCreators = creators.map((c) => ({
-      ...c,
-      ...(ratings[c.id] || noRating),
-    }));
+    const ratings = await getRatings(rows.map((c) => c.id));
+    const featuredCreators = rows
+      .map((c) => ({
+        id: c.id,
+        name: c.name,
+        avatar: c.avatar,
+        creativeType: c.sellerProfile.creativeType,
+        cover: c.listings[0]?.images?.[0] || null,
+        listingCount: c._count.listings,
+        verified: isVerified(c),
+        ...(ratings[c.id] || noRating),
+      }))
+      .sort((a, b) => Number(b.verified) - Number(a.verified) || b.reviewCount - a.reviewCount)
+      .slice(0, 8);
 
-    // Newest public requests
     const latestRequests = await prisma.ask.findMany({
       where: { status: "OPEN" },
-      include: { user: sellerSelect },
+      include: { user: person },
       orderBy: { createdAt: "desc" },
       take: 6,
     });
 
-    res.json({ categories, recommended, featuredCreators, latestRequests });
+    const testimonials = await prisma.review.findMany({
+      where: { comment: { not: null }, rating: { gte: 5 } },
+      include: {
+        reviewer: person,
+        seller: { select: { id: true, name: true, sellerProfile: { select: { creativeType: true } } } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 3,
+    });
+
+    const [creators, listings, requests] = await Promise.all([
+      prisma.sellerProfile.count(),
+      prisma.listing.count(),
+      prisma.ask.count({ where: { status: "OPEN" } }),
+    ]);
+
+    res.json({
+      categories,
+      recommended,
+      featuredCreators,
+      latestRequests,
+      testimonials,
+      stats: { creators, listings, requests },
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Server error" });

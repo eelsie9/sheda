@@ -1,5 +1,5 @@
 import prisma from "../lib/prisma.js";
-import { cleanList } from "../utils/helpers.js";
+import { cleanList, getRatings, isVerified, noRating } from "../utils/helpers.js";
 
 const cleanTags = (tags) => cleanList(tags).map((t) => t.toLowerCase());
 
@@ -67,7 +67,7 @@ export const getMyBoards = async (req, res) => {
 export const discoverBoards = async (req, res) => {
   try {
     const { search, tag, matchMine } = req.query;
-    const creativeType = req.user.sellerProfile.creativeType.toLowerCase();
+    const crafts = req.user.sellerProfile.creativeType.toLowerCase().split(",").map((c) => c.trim()).filter(Boolean);
 
     const conditions = [];
     if (search) {
@@ -81,11 +81,11 @@ export const discoverBoards = async (req, res) => {
     if (tag) conditions.push({ tags: { has: String(tag).toLowerCase() } });
     if (matchMine === "true") {
       conditions.push({
-        OR: [
-          { tags: { has: creativeType } },
-          { name: { contains: creativeType, mode: "insensitive" } },
-          { description: { contains: creativeType, mode: "insensitive" } },
-        ],
+        OR: crafts.flatMap((c) => [
+          { tags: { has: c } },
+          { name: { contains: c, mode: "insensitive" } },
+          { description: { contains: c, mode: "insensitive" } },
+        ]),
       });
     }
 
@@ -233,14 +233,12 @@ export const removeItem = async (req, res) => {
   }
 };
 
-// The side panel: suggest creators that match what is on this board
+// The side panel: suggest creators that match this board. Verified sellers come first.
 export const getRecommendations = async (req, res) => {
   try {
     const board = await prisma.board.findUnique({
       where: { id: req.params.id },
-      include: {
-        items: { include: { listing: { select: { category: true } } } },
-      },
+      include: { items: { include: { listing: { select: { category: true } } } } },
     });
     if (!board) return res.status(404).json({ error: "Board not found" });
     if (!canView(board, req.user)) return res.status(403).json({ error: "This board is private" });
@@ -271,16 +269,18 @@ export const getRecommendations = async (req, res) => {
         id: true,
         name: true,
         avatar: true,
-        sellerProfile: { select: { creativeType: true, offerings: true } },
+        bio: true,
+        sellerProfile: true,
         listings: {
           take: 3,
           orderBy: { createdAt: "desc" },
           select: { id: true, title: true, images: true, price: true, category: true },
         },
       },
-      take: 30,
+      take: 40,
     });
 
+    const ratings = await getRatings(found.map((c) => c.id));
     const creators = found
       .map((c) => {
         const text = [
@@ -290,9 +290,18 @@ export const getRecommendations = async (req, res) => {
         ]
           .join(" ")
           .toLowerCase();
-        return { ...c, matchScore: keywords.filter((k) => text.includes(k)).length };
+        return {
+          id: c.id,
+          name: c.name,
+          avatar: c.avatar,
+          sellerProfile: { creativeType: c.sellerProfile.creativeType },
+          listings: c.listings,
+          verified: isVerified(c),
+          matchScore: keywords.filter((k) => text.includes(k)).length,
+          ...(ratings[c.id] || noRating),
+        };
       })
-      .sort((a, b) => b.matchScore - a.matchScore)
+      .sort((a, b) => Number(b.verified) - Number(a.verified) || b.matchScore - a.matchScore)
       .slice(0, 10);
 
     res.json({ keywords, creators });

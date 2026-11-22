@@ -4,7 +4,7 @@ import prisma from "../lib/prisma.js";
 import { publicUser, getMissingInfo, cleanList } from "../utils/helpers.js";
 
 const signToken = (id) =>
-  jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: "7d" });
+  jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: "30d" });
 
 export const register = async (req, res) => {
   try {

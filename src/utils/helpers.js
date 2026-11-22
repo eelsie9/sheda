@@ -43,3 +43,16 @@ export const getRatings = async (sellerIds) => {
 };
 
 export const noRating = { averageRating: null, reviewCount: 0 };
+
+// A seller is "verified" when buyers have what they need to trust them
+export const isVerified = (u) => {
+  const sp = u?.sellerProfile;
+  return !!(
+    u?.avatar &&
+    u?.bio?.trim() &&
+    sp?.creativeType &&
+    sp?.offerings?.trim() &&
+    sp?.portfolioLinks?.length &&
+    sp?.socialLinks?.length
+  );
+};
